@@ -2349,8 +2349,12 @@ function loadProtocolos() {
 function limpiarFormProtocolo() {
   document.getElementById('prot-id').value = '';
   document.getElementById('modal-prot-title').textContent = 'Nuevo Protocolo';
-  ['prot-titulo','prot-categoria','prot-desc','prot-pasos','prot-observar','prot-plazos','prot-familia']
+  ['prot-titulo','prot-categoria','prot-desc','prot-pasos','prot-observar','prot-plazos','prot-familia','prot-autor','prot-fecha']
     .forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  // Limpiar PDF adjunto
+  if(typeof quitarPdfProtocolo === 'function') quitarPdfProtocolo();
+  const preview = document.getElementById('prot-preview-live');
+  if(preview) preview.innerHTML = '<div style="color:#aaa;font-size:13px;padding:20px;text-align:center;">Completá los campos para ver la vista previa</div>';
 }
 
 function renderProtocolos() {
@@ -2824,36 +2828,48 @@ function seleccionarEstudianteSeguimiento(e) {
   cargarHistorialNotas(e.id);
 }
 
+function _renderNotasHTML(el, notas, estId) {
+  if(!notas.length) {
+    el.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="empty-icon" style="font-size:28px;">📋</div><p style="font-size:14px;">Sin registros aún</p></div>';
+    return;
+  }
+  el.innerHTML = notas.map(n => {
+    const fecha = n.fecha ? new Date(n.fecha).toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'}) : '';
+    return '<div class="nota-card">' +
+      '<div class="nota-header">' +
+        '<div><span class="nota-tipo">' + (n.tipo||'Nota') + '</span>' +
+        '<span style="font-size:12px;color:var(--text-muted);margin-left:8px;">' + fecha + '</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span class="nota-meta">Por: <span class="nota-autor">' + (n.autor||'—') + '</span></span>' +
+          '<button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="eliminarNota(\'' + n.id + '\',\'' + estId + '\')">🗑️</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="nota-text">' + (n.texto||'') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
 function cargarHistorialNotas(estId) {
   const el = document.getElementById('historial-notas');
   el.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-  db.collection('notas').where('estudianteId','==',estId).orderBy('fecha','desc').get().then(snap => {
-    if(snap.empty) {
-      el.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="empty-icon" style="font-size:28px;">📋</div><p style="font-size:14px;">Sin registros aún</p></div>';
-      return;
-    }
-    const notas = snap.docs.map(d=>({id:d.id,...d.data()}));
-    el.innerHTML = notas.map(n => {
-      const fecha = n.fecha ? new Date(n.fecha).toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'}) : '';
-      return `<div class="nota-card">
-        <div class="nota-header">
-          <div>
-            <span class="nota-tipo">${n.tipo||'Nota'}</span>
-            <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">${fecha}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="nota-meta">Por: <span class="nota-autor">${n.autor||'—'}</span></span>
-            <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="eliminarNota('${n.id}','${estId}')">🗑️</button>
-          </div>
-        </div>
-        <div class="nota-text">${n.texto||''}</div>
-      </div>`;
-    }).join('');
-  }).catch(e => {
-    el.innerHTML = `<div class="info-box info-box-amber">Para usar el historial de notas, necesitás crear un índice en Firestore.<br>
-    Ve a Firestore → Índices → Agregar índice compuesto:<br>
-    Colección: <strong>notas</strong> · Campo 1: <strong>estudianteId</strong> (ASC) · Campo 2: <strong>fecha</strong> (DESC)</div>`;
-  });
+  // Intentar con orderBy (requiere índice compuesto en Firestore)
+  db.collection('notas').where('estudianteId','==',estId).orderBy('fecha','desc').get()
+    .then(snap => {
+      const notas = snap.docs.map(d=>({id:d.id,...d.data()}));
+      _renderNotasHTML(el, notas, estId);
+    })
+    .catch(() => {
+      // Fallback: sin orderBy, sort client-side (no necesita índice)
+      db.collection('notas').where('estudianteId','==',estId).get()
+        .then(snap => {
+          const notas = snap.docs.map(d=>({id:d.id,...d.data()}))
+            .sort((a,b) => (b.fecha||0) - (a.fecha||0));
+          _renderNotasHTML(el, notas, estId);
+        })
+        .catch(e2 => {
+          el.innerHTML = '<div class="info-box info-box-amber">Error al cargar las notas: ' + e2.message + '</div>';
+        });
+    });
 }
 
 async function guardarNota() {
@@ -3946,15 +3962,7 @@ function switchProtTab(tab, btn) {
   if(tab === 'diagnosticos') renderDiagLib();
 }
 
-// ===== LIMPIAR FORM PROTOCOLO — extendido con nuevos campos =====
-const _origLimpiarFormProtocolo = limpiarFormProtocolo;
-limpiarFormProtocolo = function() {
-  _origLimpiarFormProtocolo();
-  ['prot-autor','prot-fecha'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  quitarPdfProtocolo();
-  const preview = document.getElementById('prot-preview-live');
-  if(preview) preview.innerHTML = '<div style="color:#aaa;font-size:13px;padding:20px;text-align:center;">Completá los campos para ver la vista previa</div>';
-};
+// limpiarFormProtocolo ya incluye campos extendidos (prot-autor, prot-fecha, PDF) en su definición original
 
 // ===== ABRIR PDF ADJUNTO =====
 async function abrirPdfEnVentana(id, tipo) {
