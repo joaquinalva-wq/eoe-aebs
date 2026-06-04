@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "eoe-app",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "7788", "--directory", "C:/Users/alvaj/OneDrive/Documents/EOE"],
+      "port": 7788
+    }
+  ]
+}
